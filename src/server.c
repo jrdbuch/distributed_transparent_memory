@@ -78,12 +78,16 @@ int main(int argc, char *argv[])
 			client_fd = accept(master_socket_tcp, (struct sockaddr *)&client_addr, sizeof(client_addr));
 			recvfrom_bytes = recvfrom(master_socket_tcp, &buffer, sizeof(buffer), NULL, (struct sockaddr *)&client_addr); 
 
-			//handle TCP request 
-			recv_msg(&buffer, recvfrom_bytes)
+			//handle TCP request, generate response message for a given recieved message  
+			msg_t response_msg = recv_msg(&buffer, recvfrom_bytes);
 			
 			//close TCP connection immediately, no need to keep open  
-			close(client_fd)
+			close(client_fd);
 		}
+
+		//send response message
+
+
 	}
 }
 
@@ -98,7 +102,7 @@ std::map<int,int> init_server_usage(std::vector<sockaddr_in> &server_addrs)
 }
 
 
-void recv_msg(char (*msg_buffer_p)[BUFFER_SIZE], int recvfrom_bytes)
+msg_t recv_msg(char (*msg_buffer_p)[BUFFER_SIZE], int recvfrom_bytes)
 {
 	msg_t msg; 
 	memcpy(&msg_header, msg_buffer_p, sizeof(msg_t));
@@ -118,11 +122,11 @@ void recv_msg(char (*msg_buffer_p)[BUFFER_SIZE], int recvfrom_bytes)
 			std::map<int,int>::iterator search_result = local_dict.find(msg.data.key); 
 			if (search_result != local_dict.end())
 			{
-				
+
 			}
 			else
 			{
-				
+
 			}
 
 
@@ -172,6 +176,14 @@ void recv_msg(char (*msg_buffer_p)[BUFFER_SIZE], int recvfrom_bytes)
 	}
 }
 
+msg_t generate_msg(msg_type_t msg_type, ser)
+{
+
+}
+
+void send_msg(msg_t msg){
+
+}
 
 // readfds -> one bit for each fd, initilized to a huge array of 0s, one for eveyr possible fd? 
 // set fd to 1 if we want to monitor on input 

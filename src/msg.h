@@ -11,7 +11,7 @@ typedef enum {
 	PUT_RETURN,
 	REMOVE,
 	REMOVE_FORWARD
-} msg_types;
+} msg_type_t;
 
 
 //msg header
