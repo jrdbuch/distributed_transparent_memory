@@ -1,34 +1,34 @@
 #include "server.h"
 
-/*
-readfds is a sequence of bits, place corresponds to fd int, 0 if inactive, 1 if active 
-	need a seperate structure to store client socket fd that have been added
 
-*/
 
+namespace
+{
+	//load config file 
+	std::vector<sockaddr_in> server_addrs = load_server_addrs();
+
+	//init storage dicts
+	std::map<int,int> local_dict; //empty storage dict, defualt constructor???
+
+	//list of expected responses (ie the msg headers we expect to see for a response)
+	std::vector<request_t> outstanding_requests; 
+
+}
 
 
 int main(int argc, char *argv[])
 {
-	//get this server's id
-	int server_id = (int)*argv[1]; //does this work
-
-	//load addresses of all servers from config file
-	std::vector<sockaddr_in> server_addrs = load_server_addrs();
+	//get this server's id from command line input 
+	const int this_server_id = (int)*argv[1]; //does this work
 
 	//client address (could be another server or the client who is trying to use the mem)
-	sockaddr_in client_addr; 
+	sockaddr_in client_addr, server_addr;
 
 	//inits
 	fd_set readfds; //set of file descriptors being monitored 
 	int master_socket_upd, master_socket_tcp; 
 	int recvfrom_bytes = 0; 
-	char buffer[BUFFER_SIZE];
-	//need mem table for all servers (how much each server is using)
-
-	//init storage dicts
-	std::map<int,int> server_usage = init_server_usage();
-	std::map<int,int> local_dict; //empty storage dict, defualt constructor???
+	char buffer[BUFFER_SIZE] = 0;
 
 	//create master sockets 
 	master_socket_udp = socket(AF_INET, SOCK_STREAM, 0);
@@ -46,12 +46,14 @@ int main(int argc, char *argv[])
 	while(1)
 	{
 		//reset readfds, and only monitor master sockets 
-		FD_ZERO(&readfds);
+		FD_ZERO(&readfds); //set all fd bits to 0
 		FD_SET(master_socket_tcp, &readfds); //WHY????
 		FD_SET(master_socket_udp, &readfds);
 
-		//blocking call until one of more file descriptors are ready 
+		//blocking call until one of more file descriptors are ready, ADD LOOP 
 		int nfds_ready = select(nfds + 1, &readfds); 
+
+		//loop through available fd
 
 		if (nfds)
 		{
@@ -65,7 +67,11 @@ int main(int argc, char *argv[])
 			memset(&client_addr, 0, sizeof(client_addr)) //clear client address
 
 			//intialize client addr
-			recvfrom_bytes = recvfrom(master_socket_udp, &buffer, sizeof(buffer), NULL, (struct sockaddr *)&client_addr); 
+			recvfrom_bytes = recvfrom(master_socket_udp, &buffer, sizeof(buffer), NULL, (struct sockaddr *)&client_addr);
+
+			//check on recv_frombytes 
+
+			//
 		}
 
 		//incoming TCP connection request and msg 
@@ -74,20 +80,32 @@ int main(int argc, char *argv[])
 			memset(&buffer, 0, sizeof(buffer)); //clear buffer
 			memset(&client_addr, 0, sizeof(client_addr)) //clear client address
 
-			//intialize client address 
+			//intialize client address
 			client_fd = accept(master_socket_tcp, (struct sockaddr *)&client_addr, sizeof(client_addr));
 			recvfrom_bytes = recvfrom(master_socket_tcp, &buffer, sizeof(buffer), NULL, (struct sockaddr *)&client_addr); 
 
-			//handle TCP request, generate response message for a given recieved message  
-			msg_t response_msg = recv_msg(&buffer, recvfrom_bytes);
+			//check on recv_from_bytes 
 			
 			//close TCP connection immediately, no need to keep open  
+			//I think from a clients perspective we might want to keep a connection open for a get_request 
 			close(client_fd);
 		}
 
-		//send response message
+		//maybe keep connections open for those we exepct a response from ? 
+
+		//process received message and get response messages(s)
+		std::vector<msg_t> response_msgs = process_incoming_msg(&buffer, this_server_id);
+
+		//send response messages
+		for (std::vector<msg_t>::iterator it =  response_msgs.begin(); it != response_msgs.end(); ++it)
+		{
+			
+			//send UDP message 
 
 
+			//send TCP message 
+
+		}
 	}
 }
 
@@ -96,63 +114,157 @@ std::vector<sockaddr_in> load_server_addrs()
 	//load config file with server numbers and address and store each in vector 
 }
 
-std::map<int,int> init_server_usage(std::vector<sockaddr_in> &server_addrs)
+std::vector<msg_t> response_msgs process_incoming_msg(char (*msg_buffer_p)[], const int this_server_id)
 {
-	//iterate through server addresses and build map (key=server_id/position in server_addrs, val=0 memory_used by each)
-}
+	msg_t msg_recv = {0};
+	std::vector<msg_t> response_msgs;
+	memcpy(&msg_recv, msg_buffer_p, sizeof(msg_t));
 
-
-msg_t recv_msg(char (*msg_buffer_p)[BUFFER_SIZE], int recvfrom_bytes)
-{
-	msg_t msg; 
-	memcpy(&msg_header, msg_buffer_p, sizeof(msg_t));
-
-	switch(msg.header.msg_type)
+	switch(msg_recv.header.msg_type)
 	{
 		case GET:
-			//does key_val pair exist in local_dict, if yes return (key,val) to client_addr, else GET_FORWARD
 			
-			//if: key in local dict then return to client_addr with GET_FORWARD_RETURN
-			//else: GET_FORWARD to all other servers and wait for return GET_FORWARD_RETURN from each server
-				//if: a remote server has key,val return with GET_RETURN 
-				//else: return error with GET_RETURN 
+			
+			std::map<int,int>::iterator search_it = local_dict.find(msg_recv.data.key); 
 
-			//key
-
-			std::map<int,int>::iterator search_result = local_dict.find(msg.data.key); 
-			if (search_result != local_dict.end())
+			// key/val pair stored locally 
+			if (search_it != local_dict.end())
 			{
-
+				//key,val pair exists in local dict, return this data to client
+				msg_t msg_send = {0};
+				msg_send.header.msg_type = GET_RETURN;
+				msg_send.header.init_client_addr = msg_recv.header.init_client_addr;
+				msg_send.header.client_addr = server_addrs[this_server_id];
+				msg_send.header.server_addr = *client_addr;
+				msg_send.payload.key = msg_recv.data.key; 
+				msg_send.payload.val = *search_it;
+				response_msgs.push_back(msg_send);
 			}
+
+			// key/val pair does not exist locally 
 			else
 			{
+				//Data does not exist in local dict, send GET_FORWARD request to all other servers 
+				//and create an outstanding request entry. 
+				generate_request_obj();
 
+				//key,val pair does not exist in local dict, send GET_FORWARD to all other servers 
+				for (int server_id = 0; server_id < server_addrs.size(); ++server_id) //change this to loop through server_ids
+				{
+					if (server_id != this_server_id) //exclude current server
+					{
+						//generate GET_FORWARD message
+						msg_t msg_send = {0};
+						msg_send.header.msg_type = GET_FORWARD;
+						msg_send.header.init_client_addr = msg_recv.header.init_client_addr;
+						msg_send.header.client_addr = server_addrs[this_server_id];
+						msg_send.header.server_addr = *server_it;
+						msg_send.payload.key = msg_recv.data.key;
+						msg_send.payload.val = *search_it;
+						response_msgs.push_back(msg_send);
+					}
+				}
 			}
 
 
 			break;
 
 		case GET_FORWARD:
-			//if no key_val pair in local_dict, send GET_FORWARD to all other servers 
+			//send a GET_FORWARD_RETURN to sender. return key/val if it exists, otherwise return error. 
 
-			//look in local dict for val, return key,val or error with GET_FORWARD_RETURN
+			std::map<int,int>::iterator search_it = local_dict.find(msg_recv.data.key);
 
-			//key
+			msg_t msg_send = {0};
+			msg_send.header.msg_type = GET_FORWARD_RETURN;
+			msg_send.header.init_client_addr = msg_recv.header.init_client_addr;
+			msg_send.header.client_addr = server_addrs[this_server_id];
+			msg_send.header.server_addr = msg_recv.header.client_addr;
+			msg_send.payload.key = msg_recv.data.key;
+
+			//key/val pair in local dict, return key/val pair
+			if (search_it != local_dict.end())
+			{
+				msg_send.payload.error = 0;
+				msg_send.payload.val = *search_it;
+			}
+
+			//no key/val pair in local dict, return error  
+			else
+			{
+				msg_send.payload.error = 1;
+				msg_send.payload.val = 0;
+			}
+
+			response_msgs.push_back(msg_send);
+
 			break;
 
 		case GET_FORWARD_RETURN:
 			//if key_val pair in local_dict return to server who received initial GET
 			//key,val,error 
+
+			request_it = std::find(outstanding_request.begin(), outstanding_requests.end(), msg_recv.header)
+			
+			//there is a record of an outstanding request dependent on this GET_FORWARD_RETURN response
+			if (request_it != outstanding_requests.end())
+			{
+				if (!msg_recv.payload.error)
+				{
+					//the GET_FORWARD_RETURN has produced the kev/val pair of interest from original GET request 
+					//generate GET_RETURN response 
+					msg_t msg_send = {0};
+					msg_send.header.msg_type = GET_RETURN;
+					msg_send.header.init_client_addr = msg_recv.header.init_client_addr;
+					msg_send.header.client_addr = server_addrs[this_server_id];
+					msg_send.header.server_addr = msg_recv.header.init_client_addr;
+					msg_send.payload.key = msg_recv.data.key; 
+					msg_send.payload.val = msg_recv.data.val;
+					response_msgs.push_back(msg_send);
+
+					//remove request record 
+					outstanding_requests.erase(request_it);
+				}
+				else
+				{
+					//server does not have key/val pair stored locally, remove it from the list of outstanding responses
+					request_t->outstanding_responses[server_id] = 0; //will fail 
+
+					if (request_t->outstanding_responses == all 0)
+					{
+						//remove request_t
+						//generate get_return with error 
+					}
+			}
+
+
 			break;
 
 		case GET_RETURN:
-			//return key_val pair to client
-			//key, val, error
+			//search for requests linked to a GET_RETURN
+			//both REMOVE and PUT initiate a GET to search for key/val pairs 
+
+			request_it = std::find(outstanding_requests.begin(), outstanding_requests.end(), msg_recv.header);
+			response_msgs.push_back(request_it->request_response_msg);
+
+			// if request_t == PUT
+				//if GET_RETURN has error
+					//randomly choose server and generate PUT_FORWARD
+				//else
+					//generate PUT_RETURN with error 
+
+			//delete request
+
+
 			break;
 
 		case PUT:
 			//put this key,val pair into storage
-			//key,val
+			//send a GET to self which will trigger a global search for the key_val pair
+			//upon recieving response from all servers, either return error if key,val exists 
+			//or store in random server with PUT_FORWARD 
+			//open up two pending requests (GET request for self, PUT request for client)
+ 
+
 			break;
 
 		case PUT_FORWARD:
@@ -160,10 +272,9 @@ msg_t recv_msg(char (*msg_buffer_p)[BUFFER_SIZE], int recvfrom_bytes)
 			//key,val
 			break;
 
-		case SYNC_STORAGE:
-			//after chaning a local mem table, send this info to all other servers so they can update thier tables
-			//memory_usage
-			break
+		case PUT_RETURN:
+
+			break; 
 
 		case REMOVE:
 			//remove key,val pair
@@ -176,15 +287,25 @@ msg_t recv_msg(char (*msg_buffer_p)[BUFFER_SIZE], int recvfrom_bytes)
 	}
 }
 
-msg_t generate_msg(msg_type_t msg_type, ser)
+
+
+generate_request_obj()
 {
-
+	request_t outstanding_request;
+				outstanding_request.init_client_addr = msg_recv.header.init_client_addr;
+				outstanding_request.init_timestamp = ; //TO DO
+				outstanding_request.msg_type = GET_FORWARD_RETURN;
+				outstanding_request.error = 1;
+				outstanding_request.outstanding_responses = {1};
+				outstanding_request.outstanding_responses[this_server_id] = 0;
+				outstanding_requests.push_back(outstanding_request);
 }
 
-void send_msg(msg_t msg){
 
-}
 
 // readfds -> one bit for each fd, initilized to a huge array of 0s, one for eveyr possible fd? 
 // set fd to 1 if we want to monitor on input 
 // select then modifies in readfds place upon return, 0 if no read avaiable, 1 if read avaiable 
+
+
+//why don't we add 
