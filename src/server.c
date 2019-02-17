@@ -5,13 +5,13 @@
 namespace
 {
 	//load config file 
-	static std::vector<sockaddr_in> server_addrs = load_server_addrs();
+	const static std::vector<sockaddr_in> server_addrs = load_server_addrs();
 
 	//init storage dicts
 	static std::map<int,int> local_dict; //empty storage dict, defualt constructor???
 
-	//list of expected responses (ie the msg headers we expect to see for a response)
-	static std::vector<request_t> outstanding_client_requests; 
+	//actions queus
+	static std::vector<action_queue_t> action_queues;
 
 }
 
@@ -94,12 +94,13 @@ int main(int argc, char *argv[])
 		//maybe keep connections open for those we exepct a response from ? 
 
 		//process received message and get response messages(s)
-		std::vector<msg_t> response_msgs = process_incoming_msg(&buffer, this_server_id);
+		process_incoming_msg(&buffer, this_server_id);
+
+		std:vector<msg_t> outgoing_msgs = get_outgoing_msgs();
 
 		//send response messages
 		for (std::vector<msg_t>::iterator it =  response_msgs.begin(); it != response_msgs.end(); ++it)
 		{
-			
 			//send UDP message 
 
 
@@ -120,65 +121,54 @@ std::vector<msg_t> response_msgs process_incoming_msg(char (*msg_buffer_p)[], co
 	std::vector<msg_t> response_msgs;
 	memcpy(&msg_recv, msg_buffer_p, sizeof(msg_t));
 
+	//returns do no create actions 
+
 	switch(msg_recv.header.msg_type)
 	{
 		case GET:
 			
-			//seach for data requested in GET locally 
-			std::map<int,int>::iterator search_it = local_dict.find(msg_recv.data.key); 
+			action_queue_t action_queue = create_action_queue();
 
-			// if key/val pair stored locally 
-			if (search_it != local_dict.end())
+			//Send GET_FORWARD to all other servers
+			for (int server_id = 0; server_id < server_addrs.size(); ++server_id) //change this to loop through server_ids
 			{
-				//key,val pair exists in local dict, return this data to client
-				msg_t msg_send = {0};
-				msg_send.header.msg_type = GET_RETURN;
-				msg_send.header.init_client_addr = msg_recv.header.init_client_addr;
-				msg_send.header.client_addr = server_addrs[this_server_id];
-				msg_send.header.server_addr = *client_addr;
-				msg_send.payload.key = msg_recv.data.key; 
-				msg_send.payload.val = *search_it;
-				response_msgs.push_back(msg_send);
+				action_t action = {0};
+
+				//generate GET_FORWARD message
+				action.msg_send.header.msg_type = GET_FORWARD;
+				action.msg_send.header.client_addr = server_addrs[this_server_id];
+				action.msg_send.header.server_addr = *server_it;
+				action.msg_send.payload.key = msg_recv.data.key;
+				action.msg_send.payload.val = *search_it;
+
+				action_queue.push(action)
 			}
 
-			// if key/val pair does not exist locally 
-			else
-			{ 
-				//add an outstanding request to the list, we expectt a response of a given from each server
-				outstanding_client_requests.push_back(generate_request_obj()); //make sure to exclude current server
+			//add GET_RETURN action to action queue
+			action_t action = {0};
+			action.msg_send.header.msg_type = GET_RETURN;
+			action.msg_send.header.client_addr = server_addrs[this_server_id];
+			action.msg_send.header.server_addr = msg_recv.header.client_addr;
+			action.msg_send.payload.key = msg_recv.data.key;
+			action.msg_send.payload.val = *search_it;
 
-				//key,val pair does not exist in local dict, send GET_FORWARD to all other servers 
-				for (int server_id = 0; server_id < server_addrs.size(); ++server_id) //change this to loop through server_ids
-				{
-					if (server_id != this_server_id) //exclude current server
-					{
-						//generate GET_FORWARD message
-						msg_t msg_send = {0};
-						msg_send.header.msg_type = GET_FORWARD;
-						msg_send.header.init_client_addr = msg_recv.header.init_client_addr;
-						msg_send.header.client_addr = server_addrs[this_server_id];
-						msg_send.header.server_addr = *server_it;
-						msg_send.payload.key = msg_recv.data.key;
-						msg_send.payload.val = *search_it;
-						response_msgs.push_back(msg_send);
-					}
-				}
-			}
-
+			action_queue.push(action)
+			action_queues.push_back(action_queue) //add action queue to set of all action queues 
 
 			break;
 
 		case GET_FORWARD:
 			//send a GET_FORWARD_RETURN to sender. return key/val if it exists, otherwise return error. 
 
+			action_queue_t action_queue = create_action_queue();
+
 			std::map<int,int>::iterator search_it = local_dict.find(msg_recv.data.key);
 
-			msg_t msg_send = {0};
-			msg_send.header.msg_type = GET_FORWARD_RETURN;
-			msg_send.header.init_client_addr = msg_recv.header.init_client_addr;
-			msg_send.header.client_addr = server_addrs[this_server_id];
-			msg_send.header.server_addr = msg_recv.header.client_addr;
-			msg_send.payload.key = msg_recv.data.key;
+			action_t action = {0};
+			action.msg_send.header.msg_type = GET_FORWARD_RETURN;
+			action.msg_send.header.client_addr = server_addrs[this_server_id];
+			action.msg_send.header.server_addr = msg_recv.header.client_addr;
+			action.msg_send.payload.key = msg_recv.data.key;
 
 			//key/val pair in local dict, return key/val pair
 			if (search_it != local_dict.end())
@@ -194,123 +184,100 @@ std::vector<msg_t> response_msgs process_incoming_msg(char (*msg_buffer_p)[], co
 				msg_send.payload.val = 0;
 			}
 
-			response_msgs.push_back(msg_send);
+			action_queue.push(action)
+			action_queues.push_back(action_queue) //add action queue to set of all action queues 
 
 			break;
 
 		case GET_FORWARD_RETURN:
-			//if key_val pair in local_dict return to server who received initial GET
-			//key,val,error 
+			//find action queue with desired request_id 
+			request_it = std::find(action_queues.begin(), outstanding_requests.end(), msg_recv.header.request_id)
 
-			request_it = std::find(outstanding_request.begin(), outstanding_requests.end(), msg_recv.header)
-			
-			//there is a record of an outstanding request linked to this GET_FORWARD_RETURN response
-			if (request_it != outstanding_requests.end())
-			{
-				if (!msg_recv.payload.error)
-				{
-					//the GET_FORWARD_RETURN has produced the kev/val pair of interest from original GET request 
-					//generate GET_RETURN response 
-					msg_t msg_send = {0};
-					msg_send.header.msg_type = GET_RETURN;
-					msg_send.header.init_client_addr = msg_recv.header.init_client_addr;
-					msg_send.header.client_addr = server_addrs[this_server_id];
-					msg_send.header.server_addr = msg_recv.header.init_client_addr;
-					msg_send.payload.key = msg_recv.data.key; 
-					msg_send.payload.val = msg_recv.data.val;
-					response_msgs.push_back(msg_send);
-
-					//remove request record 
-					outstanding_client_requests.erase(request_it);
-				}
-				else
-				{
-					//server does not have key/val pair stored locally, remove it from the list of outstanding responses
-					request_t->server_reply[server_id] = 1; //will fail (why?)
-
-					if (request_t->server_reply == all 0)
-					{
-						//remove request_t
-						//generate get_return with error
-					}
-			}
-
+			//find GET_RETURN actions in queue dependent on this reply msg and mark as satisfied
 
 			break;
 
 		case GET_RETURN:
-			//if we recieve a GET_RETURN on a server, then we are using the GET message to search for 
-			//entry on other servers. This search can be triggered by a client PUT or REMOVE request 
+			//find action queue with desired request_id 
+			request_it = std::find(action_queues.begin(), outstanding_requests.end(), msg_recv.header.request_id)
 
-			//search for outstanding request ticket and fufill 
+			//if GET_RETURN and next message PUT_RETURN
+				//if GET_RETURN has error 
+					//mark PUT_FORWARD as ready to send
+				//if GET_RETURN no error
+					//delete PUT_FORWARD and mark PUT_RETURN as error 
+
+			//elif REMOVE 
 
 		case PUT:
-			//put this key,val pair into storage
-			//send a GET to self which will trigger a global search for the key_val pair
-			//upon recieving response from all servers, either return error if key,val exists 
-			//or store in random server with PUT_FORWARD 
-			//open up two pending requests (GET request for self, PUT request for client)
 
-			//genererate GET message to send, will return results if key/val pair exist on other server
-			msg_t msg_send = {0};
-			msg_send.header.msg_type = GET_RETURN;
-			msg_send.header.init_client_addr = msg_recv.header.init_client_addr;
-			msg_send.header.client_addr = server_addrs[this_server_id];
-			msg_send.header.server_addr = *client_addr;
-			msg_send.payload.key = msg_recv.data.key; 
-			msg_send.payload.val = *search_it;
-			response_msgs.push_back(msg_send);
+			action_queue_t action_queue = create_action_queue();
 
-			//open up an outstanding client request ticket
-			outstanding_client_requests.push_back(generate_request_obj(PUT));
+			//send GET to self 
+			action_t action = {0};
+			action.msg_send.header.msg_type = GET;
+			action.msg_send.header.client_addr = server_addrs[this_server_id];
+			action.msg_send.header.server_addr = server_addrs[this_server_id];
+			action.required_replies
+			action.msg_send.payload.key = msg_recv.data.key; 
+			action.msg_send.payload.val = msg_recv.data.val;
+			action.required_replies = 
+			action_queue.push(action);
 
-			//if no error on GET_RETURN, choose a random server to send PUT_FORWARD too and 
-			//send a PUT_RETURN back to client 
+			//randomly choose server to store key/val pair in and generate PUT_FORWARD msg
+			//do not send put_forward untill GET_RETURN has been recv with msg.error = 1 (ie key does not exist)
+			//else delete PUT_FORWARD msg 
+			action_t action = {0};
+			action.msg_send.header.msg_type = PUT_FORWARD;
+			action.msg_send.header.client_addr = server_addrs[this_server_id];
+			action.msg_send.header.server_addr = server_addrs[random];
+			action.required_replies
+			action.msg_send.payload.key = msg_recv.data.key; 
+			action.msg_send.payload.val = msg_recv.data.val;
+			action_queue.push(action);
+
+			//add PUT_RETURN into queue (will return success or fail to client)
+			action_t action = {0};
+			action.msg_send.header.msg_type = PUT_RETURN;
+			action.msg_send.header.client_addr = server_addrs[this_server_id];
+			action.msg_send.header.server_addr = msg_recv.header.client_addr;
+			action.required_replies
+			action.msg_send.payload.key = msg_recv.data.key; 
+			action.msg_send.payload.val = msg_recv.data.val;
+			action_queue.push(action);
+
+			action_queues.push_back(action_queue)
 
 			break;
 
 		case PUT_FORWARD:
-			//using mem table, choose which server has the most space, and forward PUT to 
-			//key,val
+			//double check to see if key exists already
+
+			//store key/val pair locally 
+			local_dict[msg_recv.data.key] = msg_recv.data.val;
+
 			break;
-
-		case PUT_RETURN:
-
-			break; 
 
 		case REMOVE:
 			//remove key,val pair
-			//key
+			//very similar to PUT workflow
 			break;
 
 		case REMOVE_FORWARD:
-			//key
+			break;
+
+		case REMOVE_RETURN:
 			break;
 	}
 }
 
 
-
-generate_request_obj()
-{
-	request_t outstanding_request;
-				outstanding_request.init_client_addr = msg_recv.header.init_client_addr;
-				outstanding_request.init_timestamp = ; //TO DO
-				outstanding_request.msg_type = GET_FORWARD_RETURN;
-				outstanding_request.error = 1;
-				outstanding_request.outstanding_responses = {1};
-				outstanding_request.outstanding_responses[this_server_id] = 0;
-				outstanding_requests.push_back(outstanding_request);
-}
-
-
-void fufill_request()
-{
+void get_outgoing_msgs(){
+	//go through each action queue and pop action msgs that are ready to be sent 
+	//delete actions that have the error flag enabled 
 	
+
+	//delete empty action queues 
+
+
 }
-// readfds -> one bit for each fd, initilized to a huge array of 0s, one for eveyr possible fd? 
-// set fd to 1 if we want to monitor on input 
-// select then modifies in readfds place upon return, 0 if no read avaiable, 1 if read avaiable 
-
-
-//why don't we add 

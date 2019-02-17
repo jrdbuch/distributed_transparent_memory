@@ -11,19 +11,18 @@ typedef enum {
 	PUT_FORWARD, 
 	PUT_RETURN,
 	REMOVE,
-	REMOVE_FORWARD, 
-	SYNC_STORAGE
+	REMOVE_FORWARD,
+	REMOVE_RETURN
 } msg_type_t;
 
 
 //msg header
 typedef struct //think of a way to make this more elegant instead of throwing all fields in one struct
 {
-	msg_types msg_type;
-	time_t init_timestamp; 
-	sockaddr_in init_client_addr; // address of client that initiated original request
-	sockaddr_in client_addr; //address of sending client (single hop), may not be the original client that initiates request
-	sockaddr_in server_addr; //address of recieving server (single hop)
+	msg_type_t msg_type;
+	int request_id; 
+	sockaddr_in client_addr; 
+	sockaddr_in server_addr;
 } msg_header_t;
 
 //msg bodies for differnet messages 
@@ -38,7 +37,4 @@ typedef struct
 {
 	msg_header_t header;
 	msg_payload_t payload;
-
-	//add clear method
-
 } msg_t;
