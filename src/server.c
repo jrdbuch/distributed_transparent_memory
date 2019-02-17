@@ -5,13 +5,13 @@
 namespace
 {
 	//load config file 
-	std::vector<sockaddr_in> server_addrs = load_server_addrs();
+	static std::vector<sockaddr_in> server_addrs = load_server_addrs();
 
 	//init storage dicts
-	std::map<int,int> local_dict; //empty storage dict, defualt constructor???
+	static std::map<int,int> local_dict; //empty storage dict, defualt constructor???
 
 	//list of expected responses (ie the msg headers we expect to see for a response)
-	std::vector<request_t> outstanding_requests; 
+	static std::vector<request_t> outstanding_client_requests; 
 
 }
 
@@ -124,10 +124,10 @@ std::vector<msg_t> response_msgs process_incoming_msg(char (*msg_buffer_p)[], co
 	{
 		case GET:
 			
-			
+			//seach for data requested in GET locally 
 			std::map<int,int>::iterator search_it = local_dict.find(msg_recv.data.key); 
 
-			// key/val pair stored locally 
+			// if key/val pair stored locally 
 			if (search_it != local_dict.end())
 			{
 				//key,val pair exists in local dict, return this data to client
@@ -141,12 +141,11 @@ std::vector<msg_t> response_msgs process_incoming_msg(char (*msg_buffer_p)[], co
 				response_msgs.push_back(msg_send);
 			}
 
-			// key/val pair does not exist locally 
+			// if key/val pair does not exist locally 
 			else
-			{
-				//Data does not exist in local dict, send GET_FORWARD request to all other servers 
-				//and create an outstanding request entry. 
-				generate_request_obj();
+			{ 
+				//add an outstanding request to the list, we expectt a response of a given from each server
+				outstanding_client_requests.push_back(generate_request_obj()); //make sure to exclude current server
 
 				//key,val pair does not exist in local dict, send GET_FORWARD to all other servers 
 				for (int server_id = 0; server_id < server_addrs.size(); ++server_id) //change this to loop through server_ids
@@ -205,7 +204,7 @@ std::vector<msg_t> response_msgs process_incoming_msg(char (*msg_buffer_p)[], co
 
 			request_it = std::find(outstanding_request.begin(), outstanding_requests.end(), msg_recv.header)
 			
-			//there is a record of an outstanding request dependent on this GET_FORWARD_RETURN response
+			//there is a record of an outstanding request linked to this GET_FORWARD_RETURN response
 			if (request_it != outstanding_requests.end())
 			{
 				if (!msg_recv.payload.error)
@@ -222,17 +221,17 @@ std::vector<msg_t> response_msgs process_incoming_msg(char (*msg_buffer_p)[], co
 					response_msgs.push_back(msg_send);
 
 					//remove request record 
-					outstanding_requests.erase(request_it);
+					outstanding_client_requests.erase(request_it);
 				}
 				else
 				{
 					//server does not have key/val pair stored locally, remove it from the list of outstanding responses
-					request_t->outstanding_responses[server_id] = 0; //will fail 
+					request_t->server_reply[server_id] = 1; //will fail (why?)
 
-					if (request_t->outstanding_responses == all 0)
+					if (request_t->server_reply == all 0)
 					{
 						//remove request_t
-						//generate get_return with error 
+						//generate get_return with error
 					}
 			}
 
@@ -240,22 +239,10 @@ std::vector<msg_t> response_msgs process_incoming_msg(char (*msg_buffer_p)[], co
 			break;
 
 		case GET_RETURN:
-			//search for requests linked to a GET_RETURN
-			//both REMOVE and PUT initiate a GET to search for key/val pairs 
+			//if we recieve a GET_RETURN on a server, then we are using the GET message to search for 
+			//entry on other servers. This search can be triggered by a client PUT or REMOVE request 
 
-			request_it = std::find(outstanding_requests.begin(), outstanding_requests.end(), msg_recv.header);
-			response_msgs.push_back(request_it->request_response_msg);
-
-			// if request_t == PUT
-				//if GET_RETURN has error
-					//randomly choose server and generate PUT_FORWARD
-				//else
-					//generate PUT_RETURN with error 
-
-			//delete request
-
-
-			break;
+			//search for outstanding request ticket and fufill 
 
 		case PUT:
 			//put this key,val pair into storage
@@ -263,7 +250,22 @@ std::vector<msg_t> response_msgs process_incoming_msg(char (*msg_buffer_p)[], co
 			//upon recieving response from all servers, either return error if key,val exists 
 			//or store in random server with PUT_FORWARD 
 			//open up two pending requests (GET request for self, PUT request for client)
- 
+
+			//genererate GET message to send, will return results if key/val pair exist on other server
+			msg_t msg_send = {0};
+			msg_send.header.msg_type = GET_RETURN;
+			msg_send.header.init_client_addr = msg_recv.header.init_client_addr;
+			msg_send.header.client_addr = server_addrs[this_server_id];
+			msg_send.header.server_addr = *client_addr;
+			msg_send.payload.key = msg_recv.data.key; 
+			msg_send.payload.val = *search_it;
+			response_msgs.push_back(msg_send);
+
+			//open up an outstanding client request ticket
+			outstanding_client_requests.push_back(generate_request_obj(PUT));
+
+			//if no error on GET_RETURN, choose a random server to send PUT_FORWARD too and 
+			//send a PUT_RETURN back to client 
 
 			break;
 
@@ -302,7 +304,10 @@ generate_request_obj()
 }
 
 
-
+void fufill_request()
+{
+	
+}
 // readfds -> one bit for each fd, initilized to a huge array of 0s, one for eveyr possible fd? 
 // set fd to 1 if we want to monitor on input 
 // select then modifies in readfds place upon return, 0 if no read avaiable, 1 if read avaiable 
