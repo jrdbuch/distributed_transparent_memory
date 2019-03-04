@@ -10,18 +10,30 @@
 
 typedef struct action_t
 {
-	//state info 
+	/*
+	When a client initiates a request, a unique request ID is generated. 
+
+	An action is outgoing message paired with requirements (ie server replies) that must be satisfied 
+	before sending. If we recieve all of the required replies containing the reuqest ID of interest, 
+	then action.msg will be sent, and the action will then be deleted.  
+	*/
+
+
+	//required server replies before action.msg is sent 
 	std::map<int,bool> required_replies; //key=server_id, val=is this server's response outstanding?  
 
 	//when outstanding_responses are satisifed send a message in response to the request 
 	msg_t msg; //make multiple request_response_msgs
 
-	//constructor for an action object
-	void action_t(std::vector<int> server_ids, bool is_reply_required)
+	//is there an error with this action, if yes delete 
+	bool error;
+
+
+	//default constructor 
+	void action_t()
 	{
 		error = 0;
-		msg = {0};
-		init_required_replies(server_ids, is_reply_required)
+		msg = msg();
 	}
 
 	//method to intialize vector of required replies 
@@ -60,11 +72,22 @@ typedef struct action_t
 
 typedef struct 
 {
-	int request_id;
+	//Queue of linked actions. When action 1 in the queue is completed then
+	//action 2 is unblocked, allowing us to perform this next action. This allows
+	//us to chain time dependent actions together, where each action is depenent on replies
+	//from other servers (ie allows chaining time depedent messages together)
+	
+	int request_id; //unique request_id linked to all actions in a queue
 	std::queue<action_t> queue;
+
+	void action_queue_t(int request_id_arg)
+	{
+		request_id = request_id_arg;
+	}
 
 	bool operator == (const action_queue_t a, const action_queue_t b)
 	{
+		//does queu_1 have the same request_id as queue_2?
 		if (a.request_id == b.request_id)
 		{
 			return true;
@@ -72,7 +95,7 @@ typedef struct
 
 		else
 		{
-			return false; 
+			return false;
 		}
 	}
 

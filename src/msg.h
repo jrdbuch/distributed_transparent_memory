@@ -15,8 +15,6 @@ typedef enum {
 	REMOVE_RETURN
 } msg_type_t;
 
-
-//msg header
 typedef struct //think of a way to make this more elegant instead of throwing all fields in one struct
 {
 	msg_type_t msg_type;
@@ -25,7 +23,6 @@ typedef struct //think of a way to make this more elegant instead of throwing al
 	sockaddr_in server_addr;
 } msg_header_t;
 
-//msg bodies for differnet messages 
 typedef struct
 {
 	int key;
@@ -37,4 +34,9 @@ typedef struct
 {
 	msg_header_t header;
 	msg_payload_t payload;
+
+	void msg_t()
+	{
+		//default constructor 
+	}
 } msg_t;

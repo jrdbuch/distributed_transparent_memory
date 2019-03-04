@@ -50,18 +50,16 @@ int main(int argc, char *argv[])
 		FD_SET(master_socket_tcp, &readfds); //WHY????
 		FD_SET(master_socket_udp, &readfds);
 
-		//blocking call until one of more file descriptors are ready, ADD LOOP 
+		//blocking call until one or more file descriptors are ready, ADD LOOP 
 		int nfds_ready = select(nfds + 1, &readfds); 
 
-		//loop through available fd
-
-		if (nfds)
+		if (nfds < 1)
 		{
 			//error handling
 		}
 
 		//Incoming UDP msg
-		else if (FD_ISSET(master_socket_udp, &readfds))
+		if (FD_ISSET(master_socket_udp, &readfds))
 		{
 			memset(&buffer, 0, sizeof(buffer)); // clear buffer
 			memset(&client_addr, 0, sizeof(client_addr)) //clear client address
@@ -70,12 +68,10 @@ int main(int argc, char *argv[])
 			recvfrom_bytes = recvfrom(master_socket_udp, &buffer, sizeof(buffer), NULL, (struct sockaddr *)&client_addr);
 
 			//check on recv_frombytes 
-
-			//
 		}
 
 		//incoming TCP connection request and msg 
-		else if (FD_ISSET(master_socket_tcp, &readfds))
+		if (FD_ISSET(master_socket_tcp, &readfds))
 		{
 			memset(&buffer, 0, sizeof(buffer)); //clear buffer
 			memset(&client_addr, 0, sizeof(client_addr)) //clear client address
@@ -86,12 +82,9 @@ int main(int argc, char *argv[])
 
 			//check on recv_from_bytes 
 			
-			//close TCP connection immediately, no need to keep open  
-			//I think from a clients perspective we might want to keep a connection open for a get_request 
+			//close TCP connection immediately, no need to keep open   
 			close(client_fd);
-		}
-
-		//maybe keep connections open for those we exepct a response from ? 
+		} 
 
 		//process received message and get response messages(s)
 		process_incoming_msg(&buffer, this_server_id);
@@ -99,10 +92,9 @@ int main(int argc, char *argv[])
 		std:vector<msg_t> outgoing_msgs = get_outgoing_msgs();
 
 		//send response messages
-		for (std::vector<msg_t>::iterator it =  response_msgs.begin(); it != response_msgs.end(); ++it)
+		for (std::vector<msg_t>::iterator it =  outgoing_msgs.begin(); it != outgoing_msgs.end(); ++it)
 		{
-			//send UDP message 
-
+			//send UDP message
 
 			//send TCP message 
 
@@ -115,7 +107,7 @@ std::vector<sockaddr_in> load_server_addrs()
 	//load config file with server numbers and address and store each in vector 
 }
 
-std::vector<msg_t> response_msgs process_incoming_msg(char (*msg_buffer_p)[], const int this_server_id)
+std::vector<msg_t> process_incoming_msg(char (*msg_buffer_p)[], const int this_server_id)
 {
 	msg_t msg_recv = {0};
 	std::vector<msg_t> response_msgs;
@@ -127,45 +119,53 @@ std::vector<msg_t> response_msgs process_incoming_msg(char (*msg_buffer_p)[], co
 	{
 		case GET:
 			
-			action_queue_t action_queue = create_action_queue();
+			//request from client, create action_queue
+			action_queue_t action_queue = create_action_queue(msg_recv.header.request_id);
 
-			//Send GET_FORWARD to all other servers
-			for (int server_id = 0; server_id < server_addrs.size(); ++server_id) //change this to loop through server_ids
+			//Send GET_FORWARD to all servers
+			for (int server_id = 0; server_id < server_addrs.size(); ++server_id)
 			{
 				action_t action = {0};
 
 				//generate GET_FORWARD message
+				//no required replies, send immediately 
 				action.msg_send.header.msg_type = GET_FORWARD;
+				action.msg_send.header.request_id = msg_recv.header.request_id;
 				action.msg_send.header.client_addr = server_addrs[this_server_id];
-				action.msg_send.header.server_addr = *server_it;
+				action.msg_send.header.server_addr = *server_addrs[server_id];
 				action.msg_send.payload.key = msg_recv.data.key;
-				action.msg_send.payload.val = *search_it;
 
 				action_queue.push(action)
 			}
 
 			//add GET_RETURN action to action queue
+			//enact when we hear back from all outgoing GET_FORWARDS
 			action_t action = {0};
 			action.msg_send.header.msg_type = GET_RETURN;
+			action.msg_send.header.request_id = msg_recv.header.request_id;
 			action.msg_send.header.client_addr = server_addrs[this_server_id];
 			action.msg_send.header.server_addr = msg_recv.header.client_addr;
 			action.msg_send.payload.key = msg_recv.data.key;
-			action.msg_send.payload.val = *search_it;
 
-			action_queue.push(action)
-			action_queues.push_back(action_queue) //add action queue to set of all action queues 
+			action_queue.push(action) //add GET_RETURN action to queue
+			action_queues.push_back(action_queue) //add this action queue to set of all action queues 
 
 			break;
 
 		case GET_FORWARD:
 			//send a GET_FORWARD_RETURN to sender. return key/val if it exists, otherwise return error. 
 
-			action_queue_t action_queue = create_action_queue();
 
+			//create action queue for client request 
+			action_queue_t action_queue = create_action_queue(msg_recv.header.request_id);
+
+			//search for key/val pair in local storage
 			std::map<int,int>::iterator search_it = local_dict.find(msg_recv.data.key);
 
+			//create action for queue (only 1 action in this case)
 			action_t action = {0};
 			action.msg_send.header.msg_type = GET_FORWARD_RETURN;
+			action.msg_send.header.request_id = msg_recv.header.request_id;
 			action.msg_send.header.client_addr = server_addrs[this_server_id];
 			action.msg_send.header.server_addr = msg_recv.header.client_addr;
 			action.msg_send.payload.key = msg_recv.data.key;
@@ -190,10 +190,24 @@ std::vector<msg_t> response_msgs process_incoming_msg(char (*msg_buffer_p)[], co
 			break;
 
 		case GET_FORWARD_RETURN:
-			//find action queue with desired request_id 
-			request_it = std::find(action_queues.begin(), outstanding_requests.end(), msg_recv.header.request_id)
+			//find action queue associate with a desired request_id 
+			type queue_it = std::find(action_queues.begin(), action_queues.end(), msg_recv.header.request_id);
+			action_t &get_return_action = queue_it->front();
+			server_id = ;
+			//error handling 
 
-			//find GET_RETURN actions in queue dependent on this reply msg and mark as satisfied
+			//find GET_RETURN action dependent on this reply msg, mark reply as satisfied, and adjust action msg
+			//if GET_FORWARD_RETURN has returned desired val sore in GET_RETURN payload 
+			if (get_return_action.msg.header.type == GET_RETURN)
+			{
+				if (!msg_recv.payload.error)
+				{
+					get_return_action.msg.payload.error = 1;
+					get_return_action.msg.payload.val = msg_recv.payload.val;
+				}
+
+				get_return_action.required_replies[server_id] = 0; //reply from this server is no longer required 
+			}
 
 			break;
 
@@ -216,32 +230,33 @@ std::vector<msg_t> response_msgs process_incoming_msg(char (*msg_buffer_p)[], co
 			//send GET to self 
 			action_t action = {0};
 			action.msg_send.header.msg_type = GET;
+			action.msg_send.header.request_id = msg_recv.header.request_id;
 			action.msg_send.header.client_addr = server_addrs[this_server_id];
 			action.msg_send.header.server_addr = server_addrs[this_server_id];
-			action.required_replies
 			action.msg_send.payload.key = msg_recv.data.key; 
 			action.msg_send.payload.val = msg_recv.data.val;
-			action.required_replies = 
 			action_queue.push(action);
 
 			//randomly choose server to store key/val pair in and generate PUT_FORWARD msg
 			//do not send put_forward untill GET_RETURN has been recv with msg.error = 1 (ie key does not exist)
 			//else delete PUT_FORWARD msg 
+			random_server_id =;
 			action_t action = {0};
 			action.msg_send.header.msg_type = PUT_FORWARD;
+			action.msg_send.header.request_id = msg_recv.header.request_id;
 			action.msg_send.header.client_addr = server_addrs[this_server_id];
-			action.msg_send.header.server_addr = server_addrs[random];
-			action.required_replies
-			action.msg_send.payload.key = msg_recv.data.key; 
+			action.msg_send.header.server_addr = server_addrs[random_server_id];
+			action.init_required_replies(server_addrs[this_server_id], true); //require a GET_RETURN response from self  
+			action.msg_send.payload.key = msg_recv.data.key;
 			action.msg_send.payload.val = msg_recv.data.val;
 			action_queue.push(action);
 
 			//add PUT_RETURN into queue (will return success or fail to client)
 			action_t action = {0};
 			action.msg_send.header.msg_type = PUT_RETURN;
+			action.msg_send.header.request_id = msg_recv.header.request_id;
 			action.msg_send.header.client_addr = server_addrs[this_server_id];
 			action.msg_send.header.server_addr = msg_recv.header.client_addr;
-			action.required_replies
 			action.msg_send.payload.key = msg_recv.data.key; 
 			action.msg_send.payload.val = msg_recv.data.val;
 			action_queue.push(action);
