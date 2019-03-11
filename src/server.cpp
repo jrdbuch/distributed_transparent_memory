@@ -1,18 +1,20 @@
 #include "server.h"
 
 
+
 namespace
 {
 	//load config file
 	const static std::vector<sockaddr_in> server_addrs;
 
 	//init storage dicts
-	static std::map<int,int> local_dict; //empty storage dict, default constructor???
+	static std::map<int,int> local_dict; //empty storage dict, defualt constructor???
 
 	//actions queues
 	static std::vector<action_queue_t> action_queues;
 
 }
+
 
 int main(int argc, char *argv[])
 {
@@ -30,7 +32,6 @@ int main(int argc, char *argv[])
 	fd_set readfds; //set of file descriptors being monitored 
 	int master_socket_upd, master_socket_tcp; 
 	int recvfrom_bytes = 0; 
-	int client_fd = -1;
 	char buffer[BUFFER_SIZE] = 0;
 	std:vector<msg_t> outgoing_msgs;
 
@@ -98,29 +99,17 @@ int main(int argc, char *argv[])
 			memset(&client_addr, 0, sizeof(client_addr)) //clear client address
 
 			//accept new TCP connection request
-			client_fd = accept(master_socket_tcp, (struct sockaddr *)&client_addr, sizeof(client_addr)); //creates new socket
-
-			if (client_fd > -1)
-			{
-				printf("[INFO] Accepted TCP Connection with %s:%d", 
-					net_ntoa(client_addr.sin_address), inet_ntohs(client_addr.sin_port));
-			}
-			else
-			{
-				printf("[ERROR] Failed Acceptance of TCP connection");
-			}
-
-
+			client_fd = accept(master_socket_tcp, (struct sockaddr *)&client_addr, sizeof(client_addr));
 			recvfrom_bytes = recvfrom(client_fd, &buffer, sizeof(buffer), NULL, (struct sockaddr *)&client_addr); 
 
 			//check on recv_from_bytes and client_fd
 			if (recvfrom_bytes == sizeof(msg_t)) 
 			{
-				printf("[INFO] Succesfully Received TCP message \n");
+				printf("[INFO] Succesfully Received UDP message \n");
 			}
 			else
 			{
-				printf("[ERROR] Recieved TCP bytes do not match message size \n");
+				printf("[ERROR] Recieved UDP bytes do not match message size \n");
 			}
 			
 			//close TCP connection immediately, no need to keep open   

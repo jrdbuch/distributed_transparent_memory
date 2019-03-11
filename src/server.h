@@ -4,6 +4,10 @@
 #include "int_dict.h"
 #include "msg.h"
 #include <vector>
+#include "<assert.h>"
+#include <stdio.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #define BUFFER_SIZE 128
 
@@ -14,7 +18,7 @@ typedef struct action_t
 	When a client initiates a request, a unique request ID is generated. 
 
 	An action is outgoing message paired with requirements (ie server replies) that must be satisfied 
-	before sending. If we recieve all of the required replies containing the reuqest ID of interest, 
+	before sending the action msg. If we recieve all of the required replies containing the request ID of interest, 
 	then action.msg will be sent, and the action will then be deleted.  
 	*/
 
@@ -24,9 +28,6 @@ typedef struct action_t
 
 	//when outstanding_responses are satisifed send a message in response to the request 
 	msg_t msg; //make multiple request_response_msgs
-
-	//is there an error with this action, if yes delete 
-	bool error;
 
 
 	//default constructor 
