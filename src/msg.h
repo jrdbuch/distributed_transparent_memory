@@ -19,7 +19,7 @@ typedef struct //think of a way to make this more elegant instead of throwing al
 {
 	msg_type_t msg_type;
 	int request_id; 
-	sockaddr_in client_addr; 
+	sockaddr_in client_addr;
 	sockaddr_in server_addr;
 } msg_header_t;
 

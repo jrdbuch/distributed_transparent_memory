@@ -36,6 +36,7 @@ int main(int argc, char *argv[])
 	std:vector<msg_t> outgoing_msgs;
 
 	//create master sockets 
+	printf("[INFO] Creating Master Sockets\n");
 	master_socket_udp = socket(AF_INET, SOCK_STREAM, 0);
 	master_socket_tcp = socket(AF_INET, SOCK_DGRAM, 0);
 	int nfds = master_socket_tcp > master_socket_udp ? master_socket_tcp : master_socket_udp; 
@@ -105,18 +106,18 @@ int main(int argc, char *argv[])
 			//check on recv_from_bytes and client_fd
 			if (recvfrom_bytes == sizeof(msg_t)) 
 			{
-				printf("[INFO] Succesfully Received UDP message \n");
+				printf("[INFO] Succesfully Received TCP message \n");
 			}
 			else
 			{
-				printf("[ERROR] Recieved UDP bytes do not match message size \n");
+				printf("[ERROR] Recieved TCP bytes do not match message size \n");
 			}
 			
 			//close TCP connection immediately, no need to keep open   
 			close(client_fd);
 		} 
 
-		//process received message and get response messages(s)
+		//process received message and get response messages(s) to send
 		process_incoming_msg(&buffer, this_server_id);
 
 		outgoing_msgs = get_outgoing_msgs();
