@@ -3,7 +3,7 @@
 
 int main(){
 	
-	int client_choice; 
+	int client_choice = 0; 
 	std::vector<sockaddr> server_addrs = load_server_addrs()
 
 
@@ -15,7 +15,7 @@ int main(){
 				1.) Get stored value \n
 				2.) Enter new stored value \n
 				3.) Remove stored value \n
-				Enter Choice: ");
+				Enter Choice (1-3): ");
 
 		cin >> client_choice;
 
@@ -27,13 +27,13 @@ int main(){
 		switch (int)client_choice {
 			case 1:
 				//Send GET request for a specified key
-				msg.header.msg_type;
-				msg.header.requet_id = generate_unique_request_id();
+				msg.header.msg_type = GET;
+				msg.header.request_id = generate_unique_request_id();
 				msg.header.client_addr = load_client_addr();
 
 				printf("\nEnter the key (an int) for the stored value of interest: ")
 				cin >> client_choice;
-				msg.payload.key = (int)client_choice; 
+				msg.payload.key = (int)client_choice;
 
 				printf("\nEnter the server number you would like to send the GET request to: ");
 				cin >> server_number;
